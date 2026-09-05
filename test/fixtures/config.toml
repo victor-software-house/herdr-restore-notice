@@ -1,0 +1,39 @@
+# Valid Herdr TOML with mixed nested arrays and adjacent dotted tables.
+# Bun 1.3.14 rejected this shape in a real startup hook. Herdr owns parsing it.
+onboarding = false
+
+[terminal]
+default_shell = "/bin/sh"
+shell_mode = "non_login"
+
+[update]
+version_check = false
+manifest_check = false
+
+[ui]
+pane_borders = false
+pane_outer_borders = false
+
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "agent", { token = "workspace", dim = true }],
+  [{ token = "terminal_title_stripped", dim = true }],
+]
+
+[ui.sidebar.agents.rows_by_agent]
+omp = [
+  ["state_icon", "agent", { token = "workspace", dim = true }],
+  [{ token = "$session_title", dim = true }],
+]
+
+[ui.sidebar.spaces]
+rows = [["state_icon", "workspace"], ["branch", "git_status"]]
+
+[ui.toast]
+delivery = "off"
+
+[session]
+resume_agents_on_restore = false
+
+[experimental]
+pane_history = true

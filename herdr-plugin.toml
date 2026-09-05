@@ -1,0 +1,24 @@
+id = "vsh.restore-notice"
+name = "Restore Notice"
+version = "0.0.0"
+min_herdr_version = "0.8.2"
+description = "Compact restore notices with clickable Resume, Transcript and Directory links. Agents start only on an explicit Resume click."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["sh", "scripts/install.sh"]
+
+[[startup]]
+command = ["./bin/restore-notice"]
+
+[[actions]]
+id = "resume"
+title = "Resume retained session"
+contexts = ["pane"]
+command = ["./bin/restore-notice", "resume"]
+
+[[link_handlers]]
+id = "resume"
+title = "Resume retained session"
+pattern = '^herdr-resume://[a-f0-9]{64}$'
+action = "resume"

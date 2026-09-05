@@ -1,0 +1,40 @@
+[settings]
+lockfile = true
+
+[tools]
+bun = "1.3.14"
+node = "26.7.0"
+
+[env]
+_.path = ["{{config_root}}/node_modules/.bin"]
+
+[tasks.build]
+run = "bun build src/main.ts --compile --outfile bin/restore-notice"
+
+[tasks.lint]
+run = ["biome check .", "oxlint src test scripts"]
+
+[tasks.typecheck]
+run = "tsc --noEmit"
+
+[tasks.test]
+run = "bun test"
+
+[tasks.verify]
+depends = ["lint", "typecheck", "test", "manifest-check"]
+
+[tasks."manifest-check"]
+run = "bun scripts/version.ts --check"
+
+[tasks.changeset]
+run = "changeset"
+
+[tasks.version]
+run = ["changeset version", "bun scripts/version.ts", "bun install --lockfile-only"]
+
+[tasks.package]
+depends = ["build"]
+run = "bun scripts/package.ts"
+
+[tasks.release]
+run = "bun scripts/release.ts"
