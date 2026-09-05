@@ -59,6 +59,21 @@ test("notice is colored PTY output, not pending shell input", async () => {
     await wait(/\r?\n__INPUT_EMPTY__\r?\n/);
     expect(await Bun.file(marker).exists()).toBe(false);
 
+    // Exercise genuine nonblocking PTY backpressure with software flow control.
+    // This affects only our test shell. The plugin never sends these keys.
+    terminal.write("stty ixon; printf '\\n__FLOW_READY__\\n'\n");
+    await wait(/\r?\n__FLOW_READY__\r?\n/);
+    terminal.write("\x13");
+    await Bun.sleep(20);
+    const resumeOutput = setTimeout(() => terminal.write("\x11"), 100);
+    try {
+      expect(await writeToTty(tty, "__BACKPRESSURE_OK__\r\n", async () => true)).toBe(true);
+      await wait(/__BACKPRESSURE_OK__/);
+    } finally {
+      clearTimeout(resumeOutput);
+      terminal.write("\x11");
+    }
+
     output = "";
     expect(await writeToTty(tty, "DO_NOT_PRINT", async () => false)).toBe(false);
     expect(output).not.toContain("DO_NOT_PRINT");

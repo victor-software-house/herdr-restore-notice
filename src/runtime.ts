@@ -89,10 +89,25 @@ export async function writeToTty(
       return false;
     const bytes = Buffer.from(notice);
     let offset = 0;
+    const deadline = Date.now() + 1000;
     while (offset < bytes.length) {
-      const { bytesWritten } = await file.write(bytes, offset, bytes.length - offset);
-      if (bytesWritten === 0) throw new Error("terminal accepted no output");
-      offset += bytesWritten;
+      try {
+        const { bytesWritten } = await file.write(bytes, offset, bytes.length - offset);
+        if (bytesWritten === 0) throw new Error("terminal accepted no output");
+        offset += bytesWritten;
+      } catch (error) {
+        // A nonblocking PTY can temporarily reject output while its reader or
+        // line discipline is busy. Keep the hook bounded and recheck ownership.
+        if (
+          !(error instanceof Error) ||
+          !("code" in error) ||
+          (error.code !== "EAGAIN" && error.code !== "EWOULDBLOCK") ||
+          Date.now() >= deadline
+        )
+          throw error;
+        await Bun.sleep(10);
+        if (!(await stillOwned())) return false;
+      }
     }
     return true;
   } finally {
