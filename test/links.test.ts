@@ -26,7 +26,8 @@ test("compact OSC links encode paths without exposing them as visible labels", (
   );
   expect(output).toContain("file:///tmp/session%20%231.jsonl");
   expect(output).toContain("file:///tmp/a%20b%23c");
-  expect(output).toContain(`\x1b]8;;herdr-resume://${token}\x1b\\[Resume]`);
+  expect(output).toContain(`\x1b]8;;herdr-resume://${token}\x1b\\\x1b[2m[\x1b[0m\x1b[1;36mResume`);
+  expect(output.match(/\x1b\[2m·\x1b\[0m/g)).toHaveLength(4);
   const visible = Bun.stripANSI(output);
   expect(visible).toBe("\r\npi · paused\r\n[Resume] · [Transcript] · [Directory] · Ctrl-click Resume\r\n");
   expect(visible).not.toContain("/tmp");
@@ -39,6 +40,8 @@ test("compact OSC links encode paths without exposing them as visible labels", (
     "Restore notice polish",
   );
   expect(Bun.stripANSI(named)).toStartWith("\r\npi · paused · Restore notice polish\r\n");
+  expect(named).toContain("\x1b[1mRestore notice polish\x1b[0m");
+  expect(named.match(/\x1b\[2m·\x1b\[0m/g)).toHaveLength(5);
   expect(named).toEndWith("\r\n");
 });
 

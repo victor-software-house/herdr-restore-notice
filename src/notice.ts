@@ -114,18 +114,20 @@ export function formatNotice(
   const reset = "\x1b[0m";
   const cyan = "\x1b[1;36m";
   const green = "\x1b[32m";
-  const link = (label: string, url: string) => `\x1b]8;;${url}\x1b\\${label}\x1b]8;;\x1b\\`;
+  const separator = ` ${dim}·${reset} `;
+  const link = (label: string, url: string) =>
+    `\x1b]8;;${url}\x1b\\${dim}[${reset}${cyan}${label}${reset}${dim}]${reset}\x1b]8;;\x1b\\`;
   const actions = resumeUrl
     ? [
-        link("[Resume]", resumeUrl),
-        ...(session.kind === "path" ? [link("[Transcript]", pathToFileURL(session.value).href)] : []),
-        link("[Directory]", pathToFileURL(pane.cwd).href),
+        link("Resume", resumeUrl),
+        ...(session.kind === "path" ? [link("Transcript", pathToFileURL(session.value).href)] : []),
+        link("Directory", pathToFileURL(pane.cwd).href),
         `${dim}Ctrl-click Resume${reset}`,
-      ].join(" · ")
+      ].join(separator)
     : `${green}cd -- ${quote(pane.cwd)} && ${argv.map(quote).join(" ")}${reset}`;
   return [
     "",
-    `${cyan}${session.agent}${reset} ${dim}· paused${reset}${name ? ` · ${name}` : ""}`,
+    `${cyan}${session.agent}${reset}${separator}${dim}paused${reset}${name ? `${separator}\x1b[1m${name}${reset}` : ""}`,
     actions,
     ...(missingPath ? ["\x1b[33mTranscript missing; restore it before resuming.\x1b[0m"] : []),
     "",
