@@ -247,7 +247,7 @@ test.skipIf(!binary)(
       };
       await runHook();
       const repeated = await cli("pane", "read", paneId, "--source", "recent-unwrapped", "--lines", "100");
-      expect(repeated.match(/pi session retained/g)?.length).toBe(1);
+      expect(repeated.match(/pi · paused/g)?.length).toBe(1);
 
       let previousDelivery = await deliveryFile.text();
       const firstToken: unknown = JSON.parse(previousDelivery)[0];

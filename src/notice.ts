@@ -108,6 +108,7 @@ export function formatNotice(
   argv: string[],
   missingPath: boolean,
   resumeUrl?: string,
+  name?: string,
 ): string {
   const dim = "\x1b[2m";
   const reset = "\x1b[0m";
@@ -124,7 +125,7 @@ export function formatNotice(
     : `${green}cd -- ${quote(pane.cwd)} && ${argv.map(quote).join(" ")}${reset}`;
   return [
     "",
-    `${cyan}${session.agent} session retained${reset} ${dim}· ${pane.id}${reset}`,
+    `${cyan}${session.agent}${reset} ${dim}· paused${reset}${name ? ` · ${name}` : ""}`,
     actions,
     ...(missingPath ? ["\x1b[33mTranscript missing; restore it before resuming.\x1b[0m"] : []),
     "",

@@ -3,9 +3,16 @@
 Restore your workspace without waking every agent. Resume the conversation you want with **Ctrl-click**.
 
 ```text
-pi session retained · w1:p1
+pi · paused · Restore notice polish
 [Resume] · [Transcript] · [Directory] · Ctrl-click Resume
 ```
+
+An explicit Pi session name appears when its retained transcript contains
+`session_info` metadata. Unnamed sessions show just `pi · paused`; no title is
+inferred from messages, IDs or filenames. The latest name wins, including an
+empty name that clears it. Names are capped at 64 characters; unsafe or
+unavailable names are omitted without preventing resume. Other agents retain
+the same compact `<agent> · paused` heading.
 
 A small [Herdr plugin](https://herdr.dev/docs/plugins/) that writes a colored,
 compact notice into restored shell scrollback. Nothing starts until you click

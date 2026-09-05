@@ -8,6 +8,7 @@ import {
   parsePane,
   record,
   resumeArgv,
+  type Session,
   type Shell,
   ttyPath,
 } from "./notice.ts";
@@ -192,6 +193,38 @@ export async function resume(): Promise<void> {
   );
 }
 
+export async function sessionName(session: Session): Promise<string | undefined> {
+  if (session.agent !== "pi" || session.source !== "herdr:pi" || session.kind !== "path") return;
+  try {
+    if (!(await lstat(session.value)).isFile()) return;
+    const file = await open(session.value, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      let name: string | undefined;
+      for await (const line of file.readLines()) {
+        if (!line.includes('"session_info"')) continue;
+        let entry: Record<string, unknown>;
+        try {
+          entry = record(JSON.parse(line));
+        } catch {
+          continue;
+        }
+        if (entry.type !== "session_info") continue;
+        // Pi uses the latest entry, including an empty name to clear a title.
+        const candidate = typeof entry.name === "string" ? entry.name.trim() : "";
+        name = candidate && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(candidate) ? candidate : undefined;
+      }
+      if (!name) return;
+      const chars = Array.from(name);
+      return chars.length > 64 ? `${chars.slice(0, 63).join("")}…` : name;
+    } finally {
+      await file.close();
+    }
+  } catch {
+    // Display metadata must never prevent a valid resume notice.
+    return;
+  }
+}
+
 export async function startup(): Promise<void> {
   if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_EVENT !== "startup") {
     throw new Error("run through Herdr's plugin startup hook");
@@ -256,6 +289,7 @@ export async function startup(): Promise<void> {
           argv,
           missingPath,
           links ? `herdr-resume://${identity}` : undefined,
+          await sessionName(session),
         );
         if (links)
           await Bun.write(
