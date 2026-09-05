@@ -7,8 +7,8 @@ if (!sha || process.env.GITHUB_ACTIONS !== "true") throw new Error("release runs
 if ((await $`git rev-parse HEAD`.text()).trim() !== sha)
   throw new Error("checkout does not match release SHA");
 const subject = (await $`git log -1 --format=%s`.text()).trim();
-const bootstrap = pkg.version === "0.0.0" && (await $`git rev-list --count HEAD`.text()).trim() === "1";
-if (!bootstrap && subject !== "chore(release): version packages")
+const bootstrap = pkg.version === "0.0.0";
+if (!bootstrap && !subject.startsWith("chore(release): version packages"))
   throw new Error("not a version release commit");
 const assets: string[] = [];
 for (const platform of ["darwin-arm64", "linux-x64"]) {

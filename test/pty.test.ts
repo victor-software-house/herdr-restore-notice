@@ -55,7 +55,7 @@ test("notice is colored PTY output, not pending shell input", async () => {
     expect(output).toContain(`touch ${marker}`);
     // If the displayed command had entered the line editor, this blank Enter
     // would run it. A following explicit test command proves the shell is usable.
-    terminal.write("\nprintf '__INPUT_EMPTY__\\n'\n");
+    terminal.write("\nprintf '\\n__INPUT_EMPTY__\\n'\n");
     await wait(/\r?\n__INPUT_EMPTY__\r?\n/);
     expect(await Bun.file(marker).exists()).toBe(false);
 
