@@ -53,7 +53,9 @@ so Herdr retains native session references.
 
 - **Resume**: Ctrl-click, including on macOS. Herdr handles the custom OSC 8 URI
   locally through the plugin's declared link handler. It starts the retained
-  conversation in that same pane through `herdr agent start`.
+  conversation in that same pane through `herdr agent start`. The live routing
+  name is an opaque ticket hash so it stays unique; the sidebar `agent` token
+  uses `display_agent` (the Pi session name when present, otherwise `pi`).
 - **Transcript**: a percent-encoded `file://` link, shown when the integration
   retained a file path rather than an ID. Open it using your outer terminal's
   normal hyperlink gesture.
@@ -72,16 +74,27 @@ an agent may already have started, so inspect the pane and plugin log.
 ## When the notice appears
 
 Herdr runs the startup hook after restoring a stopped server and opening its API.
-This covers both `session stop` → `session attach` and crash recovery. Merely
-attaching to an already running server, linking/enabling the plugin, or reloading
+This covers both `session stop` → `session attach` and crash recovery. The plugin
+also prints a notice when a live agent exits and the native session is still
+retained (`pane.agent_detected` with `released: true`). That is `/exit` and
+process death, not Pi `/new` and not `herdr session stop`. Merely attaching to
+an already running server, linking/enabling the plugin, or reloading
 configuration does **not** rerun startup. Do not restart a busy server to preview
 it; the next normal restore will use the installed plugin.
 
 Active agents and native deferred launches are excluded using Herdr's live
 snapshot. A foreground startup job gets up to 15 seconds to finish. Unsupported
 shells or native session sources are skipped. Live handoff deduplicates notices
-for surviving shells. Asynchronous output may appear below an existing prompt;
-the plugin never sends input to redraw it.
+for surviving shells. Agent-exit notices are not skipped merely because a
+startup notice already used the same shell. Asynchronous output may appear below
+an existing prompt; the plugin never sends input to redraw it.
+
+Retained sessions leave the agents sidebar when the process exits: Herdr has no
+paused or hibernated agent state. List them with:
+
+```sh
+herdr plugin action invoke vsh.restore-notice.list
+```
 
 ## Plain-text mode
 

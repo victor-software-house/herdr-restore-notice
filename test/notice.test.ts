@@ -8,7 +8,15 @@ import {
   type Session,
   ttyPath,
 } from "../src/notice.ts";
-import { restoredShellPanes, shellIdentity } from "../src/runtime.ts";
+import {
+  displayLabel,
+  formatRetainedLine,
+  metadataArgs,
+  releasedPaneId,
+  restoredShellPanes,
+  routingName,
+  shellIdentity,
+} from "../src/runtime.ts";
 
 const session: Session = { source: "herdr:pi", agent: "pi", kind: "path", value: "/tmp/session.jsonl" };
 const pane = { pane_id: "w1:p1", cwd: "/tmp/project", agent_session: session };
@@ -152,4 +160,59 @@ test("deduplication survives handoff but not a restarted or reused shell PID", (
   expect(shellIdentity(shell, "start-two", JSON.stringify(session))).not.toBe(key);
   expect(shellIdentity({ ...shell, pid: 124 }, "start-one", JSON.stringify(session))).not.toBe(key);
   expect(key).toMatch(/^[a-f0-9]{64}$/);
+});
+
+test("routing names stay unique hashes; display labels hide them", () => {
+  const token = "a".repeat(64);
+  expect(routingName(token)).toBe(`resume-${"a".repeat(16)}`);
+  expect(routingName(token).length).toBeLessThanOrEqual(32);
+  expect(displayLabel(session)).toBe("pi");
+  expect(displayLabel(session, "Restore notice polish")).toBe("Restore notice polish");
+  expect(metadataArgs("w1:p1", session, "pi")).toEqual([
+    "pane",
+    "report-metadata",
+    "w1:p1",
+    "--source",
+    "vsh.restore-notice",
+    "--agent",
+    "pi",
+    "--display-agent",
+    "pi",
+  ]);
+});
+
+test("release notices fire only when the agent actually left", () => {
+  const paneId = "w1:p1";
+  expect(
+    releasedPaneId({
+      event: "pane.agent_detected",
+      data: { type: "pane_agent_detected", pane_id: paneId, workspace_id: "w1", released: true },
+    }),
+  ).toBe(paneId);
+  expect(
+    releasedPaneId({
+      event: "pane.agent_detected",
+      data: { type: "pane_agent_detected", pane_id: paneId, workspace_id: "w1", released: false },
+    }),
+  ).toBeUndefined();
+  expect(
+    releasedPaneId({
+      event: "pane.agent_detected",
+      data: { type: "pane_agent_detected", pane_id: paneId, workspace_id: "w1" },
+    }),
+  ).toBeUndefined();
+  expect(
+    releasedPaneId({
+      event: "pane.agent_status_changed",
+      data: { type: "pane_agent_status_changed", pane_id: paneId, workspace_id: "w1", agent_status: "idle" },
+    }),
+  ).toBeUndefined();
+});
+
+test("retained list lines keep the paused heading without routing names", () => {
+  const parsed = parsePane(pane);
+  expect(formatRetainedLine(parsed)).toBe("pi · paused  w1:p1  /tmp/project");
+  expect(formatRetainedLine(parsed, "Restore notice polish")).toBe(
+    "pi · paused · Restore notice polish  w1:p1  /tmp/project",
+  );
 });

@@ -5,6 +5,7 @@ import { isatty } from "node:tty";
 import {
   foregroundShell,
   formatNotice,
+  type Pane,
   parsePane,
   record,
   resumeArgv,
@@ -61,6 +62,43 @@ function hash(value: string): string {
 
 export function shellIdentity(shell: Shell, started: string, sessionKey: string): string {
   return hash(JSON.stringify([shell.pid, started, shell.tty, sessionKey]));
+}
+
+export function routingName(token: string): string {
+  return `resume-${token.slice(0, 16)}`;
+}
+
+export function displayLabel(session: Session, name?: string): string {
+  return name ?? session.agent;
+}
+
+export function releasedPaneId(value: unknown): string | undefined {
+  const envelope = record(value);
+  if (envelope.event !== "pane.agent_detected") return;
+  const data = record(envelope.data);
+  if (data.type !== "pane_agent_detected" || data.released !== true) return;
+  if (typeof data.pane_id !== "string" || data.pane_id.length === 0) return;
+  return data.pane_id;
+}
+
+export function formatRetainedLine(pane: Pane, name?: string): string {
+  const session = pane.session;
+  if (!session) throw new Error("retained pane has no session");
+  return `${session.agent} · paused${name ? ` · ${name}` : ""}  ${pane.id}  ${pane.cwd}`;
+}
+
+export function metadataArgs(paneId: string, session: Session, label: string): string[] {
+  return [
+    "pane",
+    "report-metadata",
+    paneId,
+    "--source",
+    "vsh.restore-notice",
+    "--agent",
+    session.agent,
+    "--display-agent",
+    label,
+  ];
 }
 
 // Write to the slave side of the PTY: these are output bytes, not shell input.
@@ -134,6 +172,33 @@ export function resumeToken(url: string): string {
   return token;
 }
 
+function pluginDirs(): { socket: string; stateDir: string; ticketsDir: string; statePath: string } {
+  const socket = process.env.HERDR_SOCKET_PATH;
+  const stateDir = process.env.HERDR_PLUGIN_STATE_DIR;
+  if (!socket || !stateDir) throw new Error("Herdr socket and plugin state directory are required");
+  return {
+    socket,
+    stateDir,
+    ticketsDir: join(stateDir, hash(socket)),
+    statePath: join(stateDir, `${hash(socket)}.json`),
+  };
+}
+
+async function loadSeen(statePath: string): Promise<Set<string>> {
+  const previous = Bun.file(statePath);
+  const saved: unknown = (await previous.exists()) ? await previous.json() : [];
+  if (!Array.isArray(saved) || !saved.every((key) => typeof key === "string")) {
+    throw new Error("invalid restore-notice delivery state");
+  }
+  return new Set(saved);
+}
+
+async function saveSeen(statePath: string, seen: Iterable<string>): Promise<void> {
+  const temp = `${statePath}.${process.pid}.tmp`;
+  await Bun.write(temp, `${JSON.stringify([...seen])}\n`, { mode: 0o600 });
+  await rename(temp, statePath);
+}
+
 export async function resume(): Promise<void> {
   const context = record(JSON.parse(process.env.HERDR_PLUGIN_CONTEXT_JSON ?? "{}"));
   const url = process.env.HERDR_PLUGIN_CLICKED_URL;
@@ -181,7 +246,7 @@ export async function resume(): Promise<void> {
       binary,
       "agent",
       "start",
-      `resume-${token.slice(0, 16)}`,
+      routingName(token),
       "--kind",
       session.agent,
       "--pane",
@@ -191,6 +256,13 @@ export async function resume(): Promise<void> {
     ],
     35000,
   );
+  // Routing names must be unique and match [a-z][a-z0-9_-]{0,31}. Keep the
+  // ticket hash there; the sidebar agent token prefers display_agent.
+  try {
+    await herdr(...metadataArgs(current.id, session, displayLabel(session, await sessionName(session))));
+  } catch (error) {
+    console.error(`restore-notice: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function sessionName(session: Session): Promise<string | undefined> {
@@ -225,102 +297,148 @@ export async function sessionName(session: Session): Promise<string | undefined>
   }
 }
 
+async function waitForForegroundShell(paneId: string, deadline: number): Promise<Shell | undefined> {
+  do {
+    const info = await herdr("pane", "process-info", "--pane", paneId);
+    const shell = foregroundShell(info.process_info);
+    if (shell) return shell;
+    await Bun.sleep(150);
+  } while (Date.now() < deadline);
+  return;
+}
+
+async function deliverNotice(
+  raw: Record<string, unknown>,
+  links: boolean,
+  ticketsDir: string,
+  deadline: number,
+  skip?: Set<string>,
+): Promise<{ identity: string; written: boolean } | undefined> {
+  const pane = parsePane(raw);
+  const session = pane.session;
+  if (!session) return;
+  const argv = resumeArgv(session);
+  if (!argv) return;
+  const sessionKey = JSON.stringify(session);
+  const shell = await waitForForegroundShell(pane.id, deadline);
+  if (!shell || shell.pane !== pane.id) {
+    console.error(`restore-notice: ${pane.id}: skipped; no foreground POSIX shell`);
+    return;
+  }
+  const tty = ttyPath((await command(["ps", "-p", String(shell.pid), "-o", "tty="])).trim());
+  if (!tty || (shell.tty !== undefined && shell.tty !== tty)) throw new Error("shell has no matching PTY");
+  const target = { ...shell, tty };
+  const started = (await command(["ps", "-p", String(target.pid), "-o", "lstart="])).trim();
+  if (!started) throw new Error("shell process disappeared");
+  const identity = shellIdentity(target, started, sessionKey);
+  if (skip?.has(identity)) return { identity, written: false };
+  const missingPath = session.kind === "path" && !(await Bun.file(session.value).exists());
+  const notice = formatNotice(
+    pane,
+    session,
+    argv,
+    missingPath,
+    links ? `herdr-resume://${identity}` : undefined,
+    await sessionName(session),
+  );
+  if (links) {
+    await Bun.write(
+      join(ticketsDir, `${identity}.json`),
+      JSON.stringify({
+        pane: { pane_id: pane.id, cwd: pane.cwd, agent_session: session },
+      }),
+      { mode: 0o600 },
+    );
+    // A previous click claimed this identity. After the agent exits, the same
+    // shell can be offered again; drop the claim so the new notice is usable.
+    await rm(join(ticketsDir, `${identity}.json.used`), { force: true });
+  }
+  const written = await writeToTty(target.tty, notice, async () => {
+    const candidate = restoredShellPanes((await herdr("api", "snapshot")).snapshot).find(
+      (value) => value.pane_id === pane.id,
+    );
+    if (!candidate) return false;
+    const current = parsePane(candidate);
+    const now = foregroundShell((await herdr("pane", "process-info", "--pane", pane.id)).process_info);
+    if (current.agent || current.cwd !== pane.cwd || JSON.stringify(current.session) !== sessionKey)
+      return false;
+    if (
+      !now ||
+      now.pane !== target.pane ||
+      now.pid !== target.pid ||
+      (now.tty !== undefined && now.tty !== target.tty)
+    )
+      return false;
+    const currentTty = ttyPath((await command(["ps", "-p", String(target.pid), "-o", "tty="])).trim());
+    const currentStart = (await command(["ps", "-p", String(target.pid), "-o", "lstart="])).trim();
+    return started === currentStart && currentTty === target.tty;
+  });
+  if (!written) console.error(`restore-notice: ${pane.id}: skipped; pane changed before delivery`);
+  return { identity, written };
+}
+
+export async function listRetained(): Promise<void> {
+  const panes = restoredShellPanes((await herdr("api", "snapshot")).snapshot);
+  const lines: string[] = [];
+  for (const raw of panes) {
+    const pane = parsePane(raw);
+    if (!pane.session || !resumeArgv(pane.session)) continue;
+    lines.push(formatRetainedLine(pane, await sessionName(pane.session)));
+  }
+  console.log(lines.length === 0 ? "no retained sessions" : lines.join("\n"));
+}
+
+export async function released(): Promise<void> {
+  if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_EVENT !== "pane.agent_detected") {
+    throw new Error("run through Herdr's pane.agent_detected hook");
+  }
+  const paneId = releasedPaneId(JSON.parse(process.env.HERDR_PLUGIN_EVENT_JSON ?? "null"));
+  if (!paneId) return;
+  const { ticketsDir, statePath, stateDir } = pluginDirs();
+  const links = await linksEnabled();
+  await mkdir(stateDir, { recursive: true, mode: 0o700 });
+  await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + 15000;
+  let raw: Record<string, unknown> | undefined;
+  do {
+    raw = restoredShellPanes((await herdr("api", "snapshot")).snapshot).find(
+      (pane) => pane.pane_id === paneId,
+    );
+    if (raw) break;
+    await Bun.sleep(150);
+  } while (Date.now() < deadline);
+  if (!raw) return;
+  const result = await deliverNotice(raw, links, ticketsDir, deadline);
+  if (!result?.written) return;
+  const seen = await loadSeen(statePath);
+  seen.add(result.identity);
+  await saveSeen(statePath, seen);
+}
+
 export async function startup(): Promise<void> {
   if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_EVENT !== "startup") {
     throw new Error("run through Herdr's plugin startup hook");
   }
-  const socket = process.env.HERDR_SOCKET_PATH;
-  const stateDir = process.env.HERDR_PLUGIN_STATE_DIR;
-  if (!socket || !stateDir) throw new Error("Herdr socket and plugin state directory are required");
+  const { ticketsDir, statePath, stateDir } = pluginDirs();
   const links = await linksEnabled();
-  const ticketsDir = join(stateDir, hash(socket));
   await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
-
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
-  const statePath = join(stateDir, `${hash(socket)}.json`);
-  const previous = Bun.file(statePath);
-  const saved: unknown = (await previous.exists()) ? await previous.json() : [];
-  if (!Array.isArray(saved) || !saved.every((key) => typeof key === "string")) {
-    throw new Error("invalid restore-notice delivery state");
-  }
-  const seen = new Set<string>(saved);
+  const seen = await loadSeen(statePath);
   const retained = new Set<string>();
   const panes = restoredShellPanes((await herdr("api", "snapshot")).snapshot);
   const deadline = Date.now() + 15000;
   let failures = 0;
 
-  // Only panes present at server startup are considered. Never subscribe to live
-  // pane events: a later agent exit is not a server restore.
+  // Only panes present at server startup are considered here. Agent-exit notices
+  // use the pane.agent_detected hook. Live occupancy is still rechecked before
+  // any PTY write.
   await Promise.all(
     panes.map(async (raw) => {
       try {
-        const pane = parsePane(raw);
-        const session = pane.session;
-        if (!session) return;
-        const argv = resumeArgv(session);
-        if (!argv) return;
-        const sessionKey = JSON.stringify(session);
-        let shell: Shell | undefined;
-        // Shell startup can run mise/direnv and other foreground children. Wait for
-        // the original shell, never print over a running agent or arbitrary job.
-        do {
-          const info = await herdr("pane", "process-info", "--pane", pane.id);
-          shell = foregroundShell(info.process_info);
-          if (shell) break;
-          await Bun.sleep(150);
-        } while (Date.now() < deadline);
-        if (!shell || shell.pane !== pane.id) {
-          console.error(`restore-notice: ${pane.id}: skipped; no foreground POSIX shell`);
-          return;
-        }
-        const tty = ttyPath((await command(["ps", "-p", String(shell.pid), "-o", "tty="])).trim());
-        if (!tty || (shell.tty !== undefined && shell.tty !== tty))
-          throw new Error("shell has no matching PTY");
-        const target = { ...shell, tty };
-        const started = (await command(["ps", "-p", String(target.pid), "-o", "lstart="])).trim();
-        if (!started) throw new Error("shell process disappeared");
-        const identity = shellIdentity(target, started, sessionKey);
-        retained.add(identity);
-        if (seen.has(identity)) return;
-        const missingPath = session.kind === "path" && !(await Bun.file(session.value).exists());
-        const notice = formatNotice(
-          pane,
-          session,
-          argv,
-          missingPath,
-          links ? `herdr-resume://${identity}` : undefined,
-          await sessionName(session),
-        );
-        if (links)
-          await Bun.write(
-            join(ticketsDir, `${identity}.json`),
-            JSON.stringify({
-              pane: { pane_id: pane.id, cwd: pane.cwd, agent_session: session },
-            }),
-            { mode: 0o600 },
-          );
-        const written = await writeToTty(target.tty, notice, async () => {
-          const candidate = restoredShellPanes((await herdr("api", "snapshot")).snapshot).find(
-            (value) => value.pane_id === pane.id,
-          );
-          if (!candidate) return false;
-          const current = parsePane(candidate);
-          const now = foregroundShell((await herdr("pane", "process-info", "--pane", pane.id)).process_info);
-          if (current.agent || current.cwd !== pane.cwd || JSON.stringify(current.session) !== sessionKey)
-            return false;
-          if (
-            !now ||
-            now.pane !== target.pane ||
-            now.pid !== target.pid ||
-            (now.tty !== undefined && now.tty !== target.tty)
-          )
-            return false;
-          const currentTty = ttyPath((await command(["ps", "-p", String(target.pid), "-o", "tty="])).trim());
-          const currentStart = (await command(["ps", "-p", String(target.pid), "-o", "lstart="])).trim();
-          return started === currentStart && currentTty === target.tty;
-        });
-        if (written) seen.add(identity);
-        else console.error(`restore-notice: ${pane.id}: skipped; pane changed before delivery`);
+        const result = await deliverNotice(raw, links, ticketsDir, deadline, seen);
+        if (!result) return;
+        retained.add(result.identity);
+        if (result.written) seen.add(result.identity);
       } catch (error) {
         failures += 1;
         console.error(`restore-notice: ${error instanceof Error ? error.message : String(error)}`);
@@ -330,9 +448,10 @@ export async function startup(): Promise<void> {
 
   // Keyed by socket, PID and process start time, not terminal_id (which changes
   // on handoff). Retain only this startup's live shells, bounding state size.
-  const temp = `${statePath}.${process.pid}.tmp`;
-  await Bun.write(temp, `${JSON.stringify([...retained].filter((key) => seen.has(key)))}\n`, { mode: 0o600 });
-  await rename(temp, statePath);
+  await saveSeen(
+    statePath,
+    [...retained].filter((key) => seen.has(key)),
+  );
   for (const file of await readdir(ticketsDir)) {
     const token = /^([a-f0-9]{64})\.json(?:\.used)?$/.exec(file)?.[1];
     if (token && !retained.has(token)) await rm(join(ticketsDir, file));

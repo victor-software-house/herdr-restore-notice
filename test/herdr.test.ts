@@ -337,6 +337,12 @@ test.skipIf(!binary)(
       }
       expect(succeeded, await cli("plugin", "log", "list", "--plugin", "vsh.restore-notice")).toBe(true);
       expect(await Bun.file(marker).text()).toBe("--session\nnotice-test-session\n");
+      const started = record(record(JSON.parse(await cli("agent", "list"))).result);
+      if (!Array.isArray(started.agents)) throw new Error("agent list has no agents");
+      const resumed = started.agents.map(record).find((agent) => agent.pane_id === paneId);
+      expect(resumed?.agent).toBe("pi");
+      expect(String(resumed?.name ?? "")).toMatch(/^resume-[a-f0-9]{16}$/);
+      expect(resumed?.display_agent).toBe("pi");
       await rejectedClick(currentToken, paneId);
       await rm(marker);
 

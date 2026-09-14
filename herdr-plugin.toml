@@ -11,11 +11,21 @@ command = ["sh", "scripts/install.sh"]
 [[startup]]
 command = ["./bin/restore-notice"]
 
+[[events]]
+on = "pane.agent_detected"
+command = ["./bin/restore-notice"]
+
 [[actions]]
 id = "resume"
 title = "Resume retained session"
 contexts = ["pane"]
 command = ["./bin/restore-notice", "resume"]
+
+[[actions]]
+id = "list"
+title = "List retained sessions"
+contexts = ["workspace"]
+command = ["./bin/restore-notice", "list"]
 
 [[link_handlers]]
 id = "resume"
