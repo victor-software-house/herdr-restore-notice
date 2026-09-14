@@ -1,6 +1,6 @@
 id = "vsh.restore-notice"
 name = "Restore Notice"
-version = "0.0.0"
+version = "0.0.1"
 min_herdr_version = "0.8.2"
 description = "Compact restore notices with clickable Resume, Transcript and Directory links. Agents start only on an explicit Resume click."
 platforms = ["linux", "macos"]
