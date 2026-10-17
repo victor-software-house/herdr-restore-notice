@@ -15,7 +15,7 @@ concurrency:
 jobs:
   version:
     if: github.event_name == 'push'
-    runs-on: nscloud-ubuntu-24.04-amd64-4x8
+    runs-on: ubuntu-latest
     steps:
       - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
         with:
@@ -49,9 +49,9 @@ jobs:
       matrix:
         include:
           - platform: linux-x64
-            runner: nscloud-ubuntu-24.04-amd64-4x8
+            runner: ubuntu-latest
           - platform: darwin-arm64
-            runner: nscloud-macos-tahoe-arm64-6x14
+            runner: macos-26
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
@@ -72,7 +72,7 @@ jobs:
           if-no-files-found: error
   publish:
     needs: build
-    runs-on: nscloud-ubuntu-24.04-amd64-4x8
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
