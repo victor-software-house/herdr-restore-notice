@@ -10,10 +10,10 @@ import {
 } from "../src/notice.ts";
 import {
   displayLabel,
-  formatRetainedLine,
   metadataArgs,
   releasedPaneId,
   restoredShellPanes,
+  retainedPane,
   routingName,
   shellIdentity,
 } from "../src/runtime.ts";
@@ -209,10 +209,24 @@ test("release notices fire only when the agent actually left", () => {
   ).toBeUndefined();
 });
 
-test("retained list lines keep the paused heading without routing names", () => {
+test("the list names each paused pane's directory, agent kind and judged flags", () => {
   const parsed = parsePane(pane);
-  expect(formatRetainedLine(parsed)).toBe("pi · paused  w1:p1  /tmp/project");
-  expect(formatRetainedLine(parsed, "Restore notice polish")).toBe(
-    "pi · paused · Restore notice polish  w1:p1  /tmp/project",
-  );
+  expect(retainedPane(parsed, undefined, undefined)).toEqual({
+    pane_id: "w1:p1",
+    cwd: "/tmp/project",
+    agent: "pi",
+    flags: null,
+  });
+  const flags = {
+    applied: ["--model", "opus"],
+    dropped: [{ words: "fix the build", reason: "not sent again" as const }],
+    unchecked: false,
+  };
+  expect(JSON.parse(JSON.stringify(retainedPane(parsed, "Restore notice polish", flags)))).toEqual({
+    pane_id: "w1:p1",
+    cwd: "/tmp/project",
+    agent: "pi",
+    name: "Restore notice polish",
+    flags,
+  });
 });

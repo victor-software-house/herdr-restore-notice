@@ -31,6 +31,7 @@ command = ["./bin/restore-notice", "notice"]
 [[actions]]
 id = "list"
 title = "List retained sessions"
+description = "Print every paused pane as JSON: its directory, agent kind and the launch flags its notice shows."
 contexts = ["workspace"]
 command = ["./bin/restore-notice", "list"]
 

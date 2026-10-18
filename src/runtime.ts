@@ -100,10 +100,28 @@ export function releasedPaneId(value: unknown): string | undefined {
   return data.pane_id;
 }
 
-export function formatRetainedLine(pane: Pane, name?: string): string {
+// One paused pane as the `list` action prints it. A JSON API caller, such as a
+// phone client, shows these before it asks for a Resume: `cwd` and `agent` are
+// what that request names, and `flags` is what the notice shows, judged against
+// the agent's help now. `flags` is null when no launch was recorded.
+export type RetainedPane = {
+  pane_id: string;
+  cwd: string;
+  agent: string;
+  name?: string;
+  flags: Flags | null;
+};
+
+export function retainedPane(pane: Pane, name: string | undefined, flags: Flags | undefined): RetainedPane {
   const session = pane.session;
   if (!session) throw new Error("retained pane has no session");
-  return `${session.agent} · paused${name ? ` · ${name}` : ""}  ${pane.id}  ${pane.cwd}`;
+  return {
+    pane_id: pane.id,
+    cwd: pane.cwd,
+    agent: session.agent,
+    ...(name ? { name } : {}),
+    flags: flags ?? null,
+  };
 }
 
 export function metadataArgs(paneId: string, session: Session, label: string): string[] {
@@ -518,14 +536,17 @@ async function deliverNotice(
 }
 
 export async function listRetained(): Promise<void> {
-  const panes = restoredShellPanes((await herdr("api", "snapshot")).snapshot);
-  const lines: string[] = [];
-  for (const raw of panes) {
+  const { launchDir } = pluginDirs();
+  const helps: Helps = new Map();
+  const panes: RetainedPane[] = [];
+  for (const raw of restoredShellPanes((await herdr("api", "snapshot")).snapshot)) {
     const pane = parsePane(raw);
     if (!pane.session || !resumeArgv(pane.session)) continue;
-    lines.push(formatRetainedLine(pane, await sessionName(pane.session)));
+    panes.push(
+      retainedPane(pane, await sessionName(pane.session), await flagsFor(pane.session, launchDir, helps)),
+    );
   }
-  console.log(lines.length === 0 ? "no retained sessions" : lines.join("\n"));
+  console.log(JSON.stringify({ panes }, null, 2));
 }
 
 export async function agentDetected(): Promise<void> {
