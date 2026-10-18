@@ -84,7 +84,8 @@ the pane and the directory and agent kind it showed:
 
 The plugin runs the same checks as for a click, against the pane as it is now.
 The directory and agent kind must match, so a request confirmed against an older
-view of the pane is rejected. It needs no notice ticket and works with links off.
+view of the pane is rejected. It needs no notice ticket and works with links off, and applies the kept
+[launch flags](#launch-flags).
 Other invocations, such as the command palette or `herdr plugin action`, are
 rejected.
 
@@ -123,6 +124,35 @@ paused or hibernated agent state. List them with:
 herdr plugin action invoke vsh.restore-notice.list
 ```
 
+## Launch flags
+
+Herdr keeps a paused pane's conversation, not the flags its agent was started
+with. A caller that recorded them, such as Stash, hands them to the `notice`
+action, one launch line per pane without the program name, as JSON in the
+context's `selected_text`, the only free-text field an invocation carries:
+
+```json
+{"method": "plugin.action.invoke", "params": {"plugin_id": "vsh.restore-notice", "action_id": "notice",
+  "context": {"selected_text": "{\"launch\": [{\"pane_id\": \"w1:p2\", \"argv\": [\"--model\", \"opus\"]}]}"}}}
+```
+
+The plugin keeps each line with the pane's conversation, so it survives server
+restarts, and deletes it once no pane holds that conversation. Each time it
+prints a notice it reads the agent's `--help` (`codex resume --help` for Codex)
+and sorts the recorded words:
+
+| Recorded | On Resume |
+|:--|:--|
+| An option `--help` still lists, with its values | Shown in the notice and applied |
+| `--resume`, `--continue`, `--session-id`, `--fork-session` | Replaced by the paused conversation |
+| An option `--help` no longer lists | Named in the notice and left out |
+| A prompt or subcommand | Named in the notice and never sent again |
+
+When `--help` cannot be read, nothing is applied and the notice says so, because
+a value cannot be told from a prompt. A click applies exactly the flags its
+notice showed. An API resume judges them again at that moment. Model names are
+not checked; the agent reports an unknown one itself.
+
 ## Plain-text mode
 
 OSC links are enabled by default. Herdr preserves them; guessing outer-terminal
@@ -157,10 +187,12 @@ Unknown sources are never treated as executable instructions.
 The restored pane already has Herdr's native environment and cwd:
 `TERM=xterm-256color`, `COLORTERM=truecolor`, current Herdr socket/binary and
 workspace/tab/pane IDs; inherited `WT_SESSION` and `CODEX_THREAD_ID` are removed.
-The command inherits the restored shell's environment. Original extra flags,
-model settings and custom launch variables are not reconstructed by Herdr;
-this plugin does not invent or serialize them. If cwd changed, the click is
-rejected rather than silently changing directories.
+The command inherits the restored shell's environment. Herdr does not
+reconstruct original flags, model settings or custom launch variables. This
+plugin applies flags only when a caller handed them over (see
+[Launch flags](#launch-flags)) and never invents them; launch variables are not
+restored. If cwd changed, the click is rejected rather than silently changing
+directories.
 
 Herdr has no output-only history append API. Startup therefore writes to a
 verified, owned **PTY slave**: output bytes, never shell input. It checks device

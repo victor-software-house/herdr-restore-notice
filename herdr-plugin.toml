@@ -24,7 +24,7 @@ command = ["./bin/restore-notice", "resume"]
 [[actions]]
 id = "notice"
 title = "Show Resume notices"
-description = "Print the restore notice in every paused pane that has none yet, such as panes a Stash restore left paused."
+description = "Print the restore notice in every paused pane that has none yet, such as panes a Stash restore left paused, and keep the launch flags the caller hands over."
 contexts = ["workspace"]
 command = ["./bin/restore-notice", "notice"]
 
