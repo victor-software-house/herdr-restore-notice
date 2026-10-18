@@ -78,11 +78,13 @@ export function displayLabel(session: Session, name?: string): string {
   return name ?? session.agent;
 }
 
+// Herdr leaves `released` out unless it is true, and names the agent only while
+// one is in the pane, so a start is an event with an agent and no release.
 export function startedPaneId(value: unknown): string | undefined {
   const envelope = record(value);
   if (envelope.event !== "pane.agent_detected") return;
   const data = record(envelope.data);
-  if (data.type !== "pane_agent_detected" || data.released !== false) return;
+  if (data.type !== "pane_agent_detected" || data.released === true || typeof data.agent !== "string") return;
   if (typeof data.pane_id !== "string" || data.pane_id.length === 0) return;
   return data.pane_id;
 }

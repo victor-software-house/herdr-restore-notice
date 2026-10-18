@@ -206,11 +206,13 @@ describe("capture on agent start", () => {
     ).toBeUndefined();
   });
   test("only a detection, not a release, starts a capture", () => {
-    const event = (released: boolean) => ({
+    // The data exactly as Herdr 0.9.5 serializes it: no `released` key unless true.
+    const event = (data: Record<string, unknown>) => ({
       event: "pane.agent_detected",
-      data: { type: "pane_agent_detected", pane_id: "w1:p2", workspace_id: "w1", released },
+      data: { type: "pane_agent_detected", pane_id: "w1:p2", workspace_id: "w1", ...data },
     });
-    expect(startedPaneId(event(false))).toBe("w1:p2");
-    expect(startedPaneId(event(true))).toBeUndefined();
+    expect(startedPaneId(event({ agent: "claude" }))).toBe("w1:p2");
+    expect(startedPaneId(event({ agent: "claude", released: true, final_status: "idle" }))).toBeUndefined();
+    expect(startedPaneId(event({}))).toBeUndefined();
   });
 });
