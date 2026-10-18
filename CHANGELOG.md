@@ -1,5 +1,11 @@
 # herdr-restore-notice
 
+## 0.0.5
+
+### Patch Changes
+
+- 482ea09: The `list` action prints paused panes as JSON, with each pane's directory, agent kind and the launch flags its notice shows, so a JSON API client can show them before it asks for a Resume.
+
 ## 0.0.4
 
 ### Patch Changes
