@@ -1,5 +1,11 @@
 # herdr-restore-notice
 
+## 0.0.2
+
+### Patch Changes
+
+- 9414324: Record an agent's launch flags when it starts in a pane, from the agent's own process, so Herdr's own restart resumes it with them too.
+
 ## 0.0.1
 
 ### Patch Changes
