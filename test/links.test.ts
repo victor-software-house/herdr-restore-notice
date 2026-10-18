@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { formatNotice, parsePane, type Session } from "../src/notice.ts";
-import { linksEnabled, resumeToken, sessionName } from "../src/runtime.ts";
+import { linksEnabled, resumeRequest, resumeToken, sessionName } from "../src/runtime.ts";
 
 const token = "a".repeat(64);
 test("compact OSC links encode paths without exposing them as visible labels", () => {
@@ -54,6 +54,25 @@ test("resume URI is an opaque ticket, never command text or a filesystem path", 
     `herdr-resume://${token}\n`,
   ]) {
     expect(() => resumeToken(url)).toThrow();
+  }
+});
+
+test("resume runs only for a link click or an API request naming directory and agent", () => {
+  expect(resumeRequest({ invocation_source: "link_click" }, `herdr-resume://${token}`)).toEqual({
+    kind: "link",
+    token,
+  });
+  const api = { invocation_source: "api", focused_pane_cwd: "/tmp/a", focused_pane_agent: "claude" };
+  expect(resumeRequest(api, undefined)).toEqual({ kind: "api", cwd: "/tmp/a", agent: "claude" });
+  for (const [context, url] of [
+    [{ invocation_source: "link_click" }, undefined],
+    [{ invocation_source: "api", focused_pane_cwd: "/tmp/a" }, undefined],
+    [{ invocation_source: "api", focused_pane_agent: "claude" }, undefined],
+    [{ invocation_source: "cli", focused_pane_cwd: "/tmp/a", focused_pane_agent: "claude" }, undefined],
+    [{ invocation_source: "keybind", focused_pane_cwd: "/tmp/a", focused_pane_agent: "claude" }, undefined],
+    [{}, `herdr-resume://${token}`],
+  ] as const) {
+    expect(() => resumeRequest(context, url)).toThrow();
   }
 });
 

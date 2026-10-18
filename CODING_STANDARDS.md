@@ -2,7 +2,7 @@
 
 ## 1. Runtime safety
 1.1 Startup and agent-exit notices are output-only. Never send keys or commands to redraw a prompt.
-1.2 Only an explicit link click may launch an agent; reject stale, busy, changed and consumed targets.
+1.2 Only an explicit Resume request may launch an agent: a link click, or a JSON API request that names the pane's directory and agent kind. Reject stale, busy, changed and consumed targets.
 1.3 Validate external JSON and URLs. Use argv arrays; never execute URL text.
 1.4 Use Herdr's public CLI through HERDR_BIN_PATH. Document unavoidable OS integrations.
 
