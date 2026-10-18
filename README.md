@@ -124,6 +124,29 @@ paused or hibernated agent state. List them with:
 herdr plugin action invoke vsh.restore-notice.list
 ```
 
+The action prints one JSON document to the plugin log, which
+`herdr plugin log list --plugin vsh.restore-notice` returns. Each paused pane
+names its directory and agent kind, which a JSON API Resume request names too,
+and the launch flags its notice shows. `name` appears only for a named Pi
+session, and `flags` is null when no launch was recorded:
+
+```json
+{
+  "panes": [
+    {
+      "pane_id": "w1:p1",
+      "cwd": "/Users/me/project",
+      "agent": "claude",
+      "flags": {
+        "applied": ["--model", "opus"],
+        "dropped": [],
+        "unchecked": false
+      }
+    }
+  ]
+}
+```
+
 ## Launch flags
 
 Herdr keeps a paused pane's conversation, not the flags its agent was started
