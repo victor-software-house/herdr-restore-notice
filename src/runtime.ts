@@ -224,7 +224,9 @@ async function flagsFor(session: Session, launchDir: string, helps: Helps): Prom
 }
 
 async function saveLaunches(launchDir: string, snapshotPanes: Record<string, unknown>[]): Promise<void> {
-  const launches = launchInput(record(JSON.parse(process.env.HERDR_PLUGIN_CONTEXT_JSON ?? "{}")).selected_text);
+  const launches = launchInput(
+    record(JSON.parse(process.env.HERDR_PLUGIN_CONTEXT_JSON ?? "{}")).selected_text,
+  );
   if (launches.size === 0) return;
   await mkdir(launchDir, { recursive: true, mode: 0o700 });
   for (const [paneId, argv] of launches) {
@@ -540,7 +542,9 @@ async function noticeRestoredPanes(acceptLaunches: boolean): Promise<void> {
   const seen = await loadSeen(statePath);
   const retained = new Set<string>();
   const snapshot = (await herdr("api", "snapshot")).snapshot;
-  const allPanes = Array.isArray(record(snapshot).panes) ? (record(snapshot).panes as unknown[]).map(record) : [];
+  const allPanes = Array.isArray(record(snapshot).panes)
+    ? (record(snapshot).panes as unknown[]).map(record)
+    : [];
   if (acceptLaunches) await saveLaunches(launchDir, allPanes);
   const panes = restoredShellPanes(snapshot);
   const helps: Helps = new Map();

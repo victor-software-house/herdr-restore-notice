@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { formatNotice, helpArgv, helpOptions, launchFlags, launchInput, parsePane, type Session } from "../src/notice.ts";
+import {
+  formatNotice,
+  helpArgv,
+  helpOptions,
+  launchFlags,
+  launchInput,
+  parsePane,
+  type Session,
+} from "../src/notice.ts";
 
 // Excerpts of the real help output: claude 2.1 (commander) and omp 18.6 (oclif).
 const claudeHelp = `Usage: claude [options] [command] [prompt]
@@ -78,15 +86,23 @@ describe("launch flags", () => {
     });
   });
   test("the paused conversation replaces conversation pickers", () => {
-    const flags = launchFlags(["--resume", "old-id", "--fork-session", "-c", "--model", "opus"], options, claude);
+    const flags = launchFlags(
+      ["--resume", "old-id", "--fork-session", "-c", "--model", "opus"],
+      options,
+      claude,
+    );
     expect(flags.applied).toEqual(["--model", "opus"]);
     expect(flags.dropped).toEqual([]);
-    expect(launchFlags(["--resume=/tmp/old.jsonl", "--model=sonnet"], helpOptions(ompHelp), omp).applied).toEqual([
-      "--model=sonnet",
-    ]);
+    expect(
+      launchFlags(["--resume=/tmp/old.jsonl", "--model=sonnet"], helpOptions(ompHelp), omp).applied,
+    ).toEqual(["--model=sonnet"]);
   });
   test("a prompt is never sent again, and a removed option is named", () => {
-    const flags = launchFlags(["--sandbox", "--model", "opus", "Read the brief and follow it."], options, claude);
+    const flags = launchFlags(
+      ["--sandbox", "--model", "opus", "Read the brief and follow it."],
+      options,
+      claude,
+    );
     expect(flags.applied).toEqual(["--model", "opus"]);
     expect(flags.dropped).toEqual([
       { words: "--sandbox", reason: "no longer an option" },
@@ -136,15 +152,31 @@ test("the notice shows what Resume applies and what it leaves out", () => {
     dropped: [{ words: "--sandbox", reason: "no longer an option" as const }],
     unchecked: false,
   };
-  const linked = formatNotice(pane, claude, ["claude", "--resume", "abc"], false, "herdr-resume://x", undefined, flags);
+  const linked = formatNotice(
+    pane,
+    claude,
+    ["claude", "--resume", "abc"],
+    false,
+    "herdr-resume://x",
+    undefined,
+    flags,
+  );
   expect(linked).toContain("flags\x1b[0m --model opus");
   expect(linked).toContain("Not reapplied (no longer an option): --sandbox");
   const plain = formatNotice(pane, claude, ["claude", "--resume", "abc"], false, undefined, undefined, flags);
   expect(plain).toContain("claude --resume abc --model opus");
-  const unchecked = formatNotice(pane, claude, ["claude", "--resume", "abc"], false, "herdr-resume://x", undefined, {
-    applied: [],
-    dropped: [],
-    unchecked: true,
-  });
+  const unchecked = formatNotice(
+    pane,
+    claude,
+    ["claude", "--resume", "abc"],
+    false,
+    "herdr-resume://x",
+    undefined,
+    {
+      applied: [],
+      dropped: [],
+      unchecked: true,
+    },
+  );
   expect(unchecked).toContain("Launch flags not reapplied: claude --help could not be read.");
 });

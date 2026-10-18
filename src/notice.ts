@@ -81,7 +81,9 @@ export function helpArgv(session: Session): string[] | undefined {
   const argv = resumeArgv(session);
   if (!argv) return;
   const [executable, word] = argv;
-  return word?.startsWith("-") ? [executable as string, "--help"] : [executable as string, word as string, "--help"];
+  return word?.startsWith("-")
+    ? [executable as string, "--help"]
+    : [executable as string, word as string, "--help"];
 }
 
 type Arity = "none" | "one" | "optional" | "many";
@@ -98,7 +100,9 @@ export function helpOptions(help: string): Map<string, Arity> {
     const names = tokens.map((token) => /^--?[A-Za-z0-9][\w-]*/.exec(token)?.[0]);
     if (names.some((name) => name === undefined)) continue;
     const last = tokens.at(-1) as string;
-    const marker = /^[\s=]?(<[^>]*>|\[[^\]]*\])/.exec(last.slice((names.at(-1) as string).length) || match[2] || "")?.[1];
+    const marker = /^[\s=]?(<[^>]*>|\[[^\]]*\])/.exec(
+      last.slice((names.at(-1) as string).length) || match[2] || "",
+    )?.[1];
     const arity: Arity = !marker
       ? "none"
       : marker.endsWith("...>") || marker.endsWith("...]")
@@ -123,7 +127,11 @@ export type Flags = {
 // Split a recorded launch line (program name removed) into what Resume applies
 // and what it leaves out. `options` is undefined when the agent's help could not
 // be read: then nothing is applied, because a value cannot be told from a prompt.
-export function launchFlags(argv: string[], options: Map<string, Arity> | undefined, session: Session): Flags {
+export function launchFlags(
+  argv: string[],
+  options: Map<string, Arity> | undefined,
+  session: Session,
+): Flags {
   if (!options) return { applied: [], dropped: [], unchecked: argv.length > 0 };
   const resumeFlag = resumeArgv(session)?.[1]?.replace(/=.*$/, "");
   const flags: Flags = { applied: [], dropped: [], unchecked: false };
@@ -149,7 +157,8 @@ export function launchFlags(argv: string[], options: Map<string, Arity> | undefi
       }
     }
     if (sessionOptions.has(name) || name === resumeFlag) continue;
-    if (arity === undefined) flags.dropped.push({ words: [word, ...values].join(" "), reason: "no longer an option" });
+    if (arity === undefined)
+      flags.dropped.push({ words: [word, ...values].join(" "), reason: "no longer an option" });
     else flags.applied.push(word, ...values);
   }
   return flags;
@@ -213,6 +222,7 @@ export function formatNotice(
   missingPath: boolean,
   resumeUrl?: string,
   name?: string,
+  flags?: Flags,
 ): string {
   const dim = "\x1b[2m";
   const reset = "\x1b[0m";
@@ -231,9 +241,15 @@ export function formatNotice(
     : `${green}cd -- ${quote(pane.cwd)} && ${[...argv, ...(flags?.applied ?? [])].map(quote).join(" ")}${reset}`;
   const yellow = "\x1b[33m";
   const flagLines = [
-    ...(resumeUrl && flags?.applied.length ? [`${dim}flags${reset} ${flags.applied.map(quote).join(" ")}`] : []),
-    ...(flags?.dropped ?? []).map(({ words, reason }) => `${yellow}Not reapplied (${reason}): ${words}${reset}`),
-    ...(flags?.unchecked ? [`${yellow}Launch flags not reapplied: ${argv[0]} --help could not be read.${reset}`] : []),
+    ...(resumeUrl && flags?.applied.length
+      ? [`${dim}flags${reset} ${flags.applied.map(quote).join(" ")}`]
+      : []),
+    ...(flags?.dropped ?? []).map(
+      ({ words, reason }) => `${yellow}Not reapplied (${reason}): ${words}${reset}`,
+    ),
+    ...(flags?.unchecked
+      ? [`${yellow}Launch flags not reapplied: ${argv[0]} --help could not be read.${reset}`]
+      : []),
   ];
   return [
     "",
