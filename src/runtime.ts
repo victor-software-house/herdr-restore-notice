@@ -446,6 +446,20 @@ export async function startup(): Promise<void> {
   if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_EVENT !== "startup") {
     throw new Error("run through Herdr's plugin startup hook");
   }
+  await noticeRestoredPanes();
+}
+
+// The startup scan on request, for panes paused after startup, such as the panes
+// a Stash restore leaves with their conversations. Panes already noticed keep
+// their ticket and get no second notice.
+export async function notice(): Promise<void> {
+  if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_ACTION_ID !== "notice") {
+    throw new Error("run through Herdr's notice plugin action");
+  }
+  await noticeRestoredPanes();
+}
+
+async function noticeRestoredPanes(): Promise<void> {
   const { ticketsDir, statePath, stateDir } = pluginDirs();
   const links = await linksEnabled();
   await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
@@ -456,7 +470,7 @@ export async function startup(): Promise<void> {
   const deadline = Date.now() + 15000;
   let failures = 0;
 
-  // Only panes present at server startup are considered here. Agent-exit notices
+  // Only panes present when this scan runs are considered here. Agent-exit notices
   // use the pane.agent_detected hook. Live occupancy is still rechecked before
   // any PTY write.
   await Promise.all(
@@ -474,7 +488,7 @@ export async function startup(): Promise<void> {
   );
 
   // Keyed by socket, PID and process start time, not terminal_id (which changes
-  // on handoff). Retain only this startup's live shells, bounding state size.
+  // on handoff). Retain only this scan's live shells, bounding state size.
   await saveSeen(
     statePath,
     [...retained].filter((key) => seen.has(key)),
