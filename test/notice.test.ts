@@ -185,25 +185,25 @@ test("release notices fire only when the agent actually left", () => {
   const paneId = "w1:p1";
   expect(
     releasedPaneId({
-      event: "pane.agent_detected",
+      event: "pane_agent_detected",
       data: { type: "pane_agent_detected", pane_id: paneId, workspace_id: "w1", released: true },
     }),
   ).toBe(paneId);
   expect(
     releasedPaneId({
-      event: "pane.agent_detected",
+      event: "pane_agent_detected",
       data: { type: "pane_agent_detected", pane_id: paneId, workspace_id: "w1", released: false },
     }),
   ).toBeUndefined();
   expect(
     releasedPaneId({
-      event: "pane.agent_detected",
+      event: "pane_agent_detected",
       data: { type: "pane_agent_detected", pane_id: paneId, workspace_id: "w1" },
     }),
   ).toBeUndefined();
   expect(
     releasedPaneId({
-      event: "pane.agent_status_changed",
+      event: "pane_agent_status_changed",
       data: { type: "pane_agent_status_changed", pane_id: paneId, workspace_id: "w1", agent_status: "idle" },
     }),
   ).toBeUndefined();
