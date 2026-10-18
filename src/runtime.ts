@@ -3,6 +3,7 @@ import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isatty } from "node:tty";
 import {
+  agentLaunch,
   type Flags,
   foregroundShell,
   formatNotice,
@@ -75,6 +76,15 @@ export function routingName(token: string): string {
 
 export function displayLabel(session: Session, name?: string): string {
   return name ?? session.agent;
+}
+
+export function startedPaneId(value: unknown): string | undefined {
+  const envelope = record(value);
+  if (envelope.event !== "pane.agent_detected") return;
+  const data = record(envelope.data);
+  if (data.type !== "pane_agent_detected" || data.released !== false) return;
+  if (typeof data.pane_id !== "string" || data.pane_id.length === 0) return;
+  return data.pane_id;
 }
 
 export function releasedPaneId(value: unknown): string | undefined {
@@ -228,7 +238,6 @@ async function saveLaunches(launchDir: string, snapshotPanes: Record<string, unk
     record(JSON.parse(process.env.HERDR_PLUGIN_CONTEXT_JSON ?? "{}")).selected_text,
   );
   if (launches.size === 0) return;
-  await mkdir(launchDir, { recursive: true, mode: 0o700 });
   for (const [paneId, argv] of launches) {
     const raw = snapshotPanes.find((pane) => pane.pane_id === paneId);
     const session = raw && parsePane(raw).session;
@@ -236,11 +245,37 @@ async function saveLaunches(launchDir: string, snapshotPanes: Record<string, unk
       console.error(`restore-notice: ${paneId}: launch flags ignored; the pane holds no conversation`);
       continue;
     }
-    const path = launchPath(launchDir, session);
-    const temp = `${path}.${process.pid}.tmp`;
-    await Bun.write(temp, `${JSON.stringify({ argv })}\n`, { mode: 0o600 });
-    await rename(temp, path);
+    await writeLaunch(launchDir, session, argv);
   }
+}
+
+async function writeLaunch(launchDir: string, session: Session, argv: string[]): Promise<void> {
+  await mkdir(launchDir, { recursive: true, mode: 0o700 });
+  const path = launchPath(launchDir, session);
+  const temp = `${path}.${process.pid}.tmp`;
+  await Bun.write(temp, `${JSON.stringify({ argv })}\n`, { mode: 0o600 });
+  await rename(temp, path);
+}
+
+// An agent started in a pane: keep its launch line for the pane's conversation,
+// so a later restart, Herdr's own or a Stash restore, resumes it with the same
+// flags. The integration reports the conversation a moment after the agent
+// appears, so this waits for it. A line that cannot be read leaves any kept one.
+async function captureLaunch(paneId: string): Promise<void> {
+  const { launchDir } = pluginDirs();
+  const deadline = Date.now() + 15000;
+  let session: Session | undefined;
+  do {
+    const pane = parsePane((await herdr("pane", "get", paneId)).pane);
+    if (!pane.agent) return;
+    session = pane.session;
+    if (session) break;
+    await Bun.sleep(500);
+  } while (Date.now() < deadline);
+  const executable = session && resumeArgv(session)?.[0];
+  if (!session || !executable) return;
+  const argv = agentLaunch((await herdr("pane", "process-info", "--pane", paneId)).process_info, executable);
+  if (argv) await writeLaunch(launchDir, session, argv);
 }
 
 async function loadSeen(statePath: string): Promise<Set<string>> {
@@ -489,11 +524,14 @@ export async function listRetained(): Promise<void> {
   console.log(lines.length === 0 ? "no retained sessions" : lines.join("\n"));
 }
 
-export async function released(): Promise<void> {
+export async function agentDetected(): Promise<void> {
   if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_EVENT !== "pane.agent_detected") {
     throw new Error("run through Herdr's pane.agent_detected hook");
   }
-  const paneId = releasedPaneId(JSON.parse(process.env.HERDR_PLUGIN_EVENT_JSON ?? "null"));
+  const event: unknown = JSON.parse(process.env.HERDR_PLUGIN_EVENT_JSON ?? "null");
+  const started = startedPaneId(event);
+  if (started) return captureLaunch(started);
+  const paneId = releasedPaneId(event);
   if (!paneId) return;
   const { ticketsDir, statePath, stateDir, launchDir } = pluginDirs();
   const links = await linksEnabled();
