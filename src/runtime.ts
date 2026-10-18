@@ -199,28 +199,38 @@ async function saveSeen(statePath: string, seen: Iterable<string>): Promise<void
   await rename(temp, statePath);
 }
 
+// A link click names the shell and session its notice was printed for. A JSON
+// API caller, such as a phone client that asked its user first, names the pane
+// with the directory and agent kind it showed that user.
+export type ResumeRequest = { kind: "link"; token: string } | { kind: "api"; cwd: string; agent: string };
+
+export function resumeRequest(context: Record<string, unknown>, url: string | undefined): ResumeRequest {
+  if (context.invocation_source === "link_click" && url) return { kind: "link", token: resumeToken(url) };
+  if (
+    context.invocation_source === "api" &&
+    typeof context.focused_pane_cwd === "string" &&
+    typeof context.focused_pane_agent === "string"
+  ) {
+    return { kind: "api", cwd: context.focused_pane_cwd, agent: context.focused_pane_agent };
+  }
+  throw new Error("resume requires a link click, or an API request naming the pane's directory and agent");
+}
+
 export async function resume(): Promise<void> {
   const context = record(JSON.parse(process.env.HERDR_PLUGIN_CONTEXT_JSON ?? "{}"));
-  const url = process.env.HERDR_PLUGIN_CLICKED_URL;
   const socket = process.env.HERDR_SOCKET_PATH;
   const stateDir = process.env.HERDR_PLUGIN_STATE_DIR;
   const binary = process.env.HERDR_BIN_PATH;
-  if (context.invocation_source !== "link_click" || !url || !socket || !stateDir || !binary) {
-    throw new Error("resume requires a Herdr link click");
+  const paneId = process.env.HERDR_PANE_ID;
+  if (!socket || !stateDir || !binary || !paneId) {
+    throw new Error("resume requires Herdr's socket, plugin state directory, binary and pane");
   }
-  const token = resumeToken(url);
-  const ticketPath = join(stateDir, hash(socket), `${token}.json`);
-  const ticket = record(await Bun.file(ticketPath).json());
-  const original = parsePane(ticket.pane);
-  if (original.id !== process.env.HERDR_PANE_ID) throw new Error("link belongs to another pane");
+  const request = resumeRequest(context, process.env.HERDR_PLUGIN_CLICKED_URL);
   const raw = restoredShellPanes((await herdr("api", "snapshot")).snapshot).find(
-    (pane) => pane.pane_id === original.id,
+    (pane) => pane.pane_id === paneId,
   );
   if (!raw) throw new Error("pane is no longer an available restored shell");
   const current = parsePane(raw);
-  if (current.cwd !== original.cwd || JSON.stringify(current.session) !== JSON.stringify(original.session)) {
-    throw new Error("retained session or directory changed");
-  }
   const session = current.session;
   const argv = session && resumeArgv(session);
   if (!session || !argv) throw new Error("unsupported native session");
@@ -230,15 +240,32 @@ export async function resume(): Promise<void> {
   if (!shell) throw new Error("pane is busy");
   const tty = ttyPath((await command(["ps", "-p", String(shell.pid), "-o", "tty="])).trim());
   const started = (await command(["ps", "-p", String(shell.pid), "-o", "lstart="])).trim();
-  if (
-    !tty ||
-    (shell.tty !== undefined && shell.tty !== tty) ||
-    shellIdentity({ ...shell, tty }, started, JSON.stringify(session)) !== token
-  ) {
+  if (!tty || (shell.tty !== undefined && shell.tty !== tty)) {
     throw new Error("resume link expired after the shell changed");
   }
-  // Exclusive claim prevents concurrent/replayed clicks, including a launch that
-  // succeeds but times out waiting for agent readiness. Never retry blindly.
+  const token = shellIdentity({ ...shell, tty }, started, JSON.stringify(session));
+  const ticketsDir = join(stateDir, hash(socket));
+  const ticketPath = join(ticketsDir, `${token}.json`);
+  switch (request.kind) {
+    case "link": {
+      if (request.token !== token) throw new Error("resume link expired after the shell changed");
+      const original = parsePane(record(await Bun.file(ticketPath).json()).pane);
+      if (original.id !== paneId) throw new Error("link belongs to another pane");
+      if (original.cwd !== current.cwd || JSON.stringify(original.session) !== JSON.stringify(session)) {
+        throw new Error("retained session or directory changed");
+      }
+      break;
+    }
+    case "api": {
+      if (request.cwd !== current.cwd || request.agent !== session.agent) {
+        throw new Error("retained session or directory changed");
+      }
+      await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
+      break;
+    }
+  }
+  // Exclusive claim prevents concurrent/replayed requests, including a launch
+  // that succeeds but times out waiting for agent readiness. Never retry blindly.
   const claim = await open(`${ticketPath}.used`, "wx", 0o600);
   await claim.close();
   await command(

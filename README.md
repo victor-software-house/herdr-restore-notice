@@ -71,6 +71,23 @@ history links and reused tickets are rejected. An exclusive claim prevents two
 clicks from starting two agents. A readiness timeout does not trigger a retry:
 an agent may already have started, so inspect the pane and plugin log.
 
+## Resume from another client
+
+A client of Herdr's JSON API, such as a phone client that asked its user first,
+can request the same resume without a click. It invokes the `resume` action with
+the pane and the directory and agent kind it showed:
+
+```json
+{"method": "plugin.action.invoke", "params": {"plugin_id": "vsh.restore-notice", "action_id": "resume",
+  "context": {"focused_pane_id": "w1:p2", "focused_pane_cwd": "/home/me/project", "focused_pane_agent": "claude"}}}
+```
+
+The plugin runs the same checks as for a click, against the pane as it is now.
+The directory and agent kind must match, so a request confirmed against an older
+view of the pane is rejected. It needs no notice ticket and works with links off.
+Other invocations, such as the command palette or `herdr plugin action`, are
+rejected.
+
 ## When the notice appears
 
 Herdr runs the startup hook after restoring a stopped server and opening its API.
@@ -139,7 +156,7 @@ Herdr has no output-only history append API. Startup therefore writes to a
 verified, owned **PTY slave**: output bytes, never shell input. It checks device
 identity, rejects symlinks/non-terminal files, and rechecks the pane before
 writing. A process starting after the final output check can interleave output,
-but receives no input from the notice. Only an explicit Resume click invokes
+but receives no input from the notice. Only an explicit Resume request invokes
 `agent start`, which performs its own server-side shell-availability check.
 
 Inspect errors with:
