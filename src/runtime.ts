@@ -3,8 +3,13 @@ import { lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isatty } from "node:tty";
 import {
+  type Flags,
   foregroundShell,
   formatNotice,
+  helpArgv,
+  helpOptions,
+  launchFlags,
+  launchInput,
   type Pane,
   parsePane,
   record,
@@ -172,7 +177,13 @@ export function resumeToken(url: string): string {
   return token;
 }
 
-function pluginDirs(): { socket: string; stateDir: string; ticketsDir: string; statePath: string } {
+function pluginDirs(): {
+  socket: string;
+  stateDir: string;
+  ticketsDir: string;
+  statePath: string;
+  launchDir: string;
+} {
   const socket = process.env.HERDR_SOCKET_PATH;
   const stateDir = process.env.HERDR_PLUGIN_STATE_DIR;
   if (!socket || !stateDir) throw new Error("Herdr socket and plugin state directory are required");
@@ -181,7 +192,53 @@ function pluginDirs(): { socket: string; stateDir: string; ticketsDir: string; s
     stateDir,
     ticketsDir: join(stateDir, hash(socket)),
     statePath: join(stateDir, `${hash(socket)}.json`),
+    launchDir: join(stateDir, `${hash(socket)}.launch`),
   };
+}
+
+// One recorded launch line per conversation, as Stash handed it over, so it
+// outlives the pane and the server. Judged against the agent's help each time it
+// is shown or used, since the agent may have changed since it was recorded.
+function launchPath(launchDir: string, session: Session): string {
+  return join(launchDir, `${hash(JSON.stringify(session))}.json`);
+}
+
+type Helps = Map<string, Promise<ReturnType<typeof helpOptions> | undefined>>;
+
+async function flagsFor(session: Session, launchDir: string, helps: Helps): Promise<Flags | undefined> {
+  const file = Bun.file(launchPath(launchDir, session));
+  if (!(await file.exists())) return;
+  const argv = record(await file.json()).argv;
+  if (!Array.isArray(argv) || !argv.every((word) => typeof word === "string")) {
+    throw new Error("invalid launch record");
+  }
+  const help = helpArgv(session);
+  if (!help) return;
+  const key = help.join(" ");
+  let options = helps.get(key);
+  if (!options) {
+    options = command(help).then(helpOptions, () => undefined);
+    helps.set(key, options);
+  }
+  return launchFlags(argv, await options, session);
+}
+
+async function saveLaunches(launchDir: string, snapshotPanes: Record<string, unknown>[]): Promise<void> {
+  const launches = launchInput(record(JSON.parse(process.env.HERDR_PLUGIN_CONTEXT_JSON ?? "{}")).selected_text);
+  if (launches.size === 0) return;
+  await mkdir(launchDir, { recursive: true, mode: 0o700 });
+  for (const [paneId, argv] of launches) {
+    const raw = snapshotPanes.find((pane) => pane.pane_id === paneId);
+    const session = raw && parsePane(raw).session;
+    if (!session) {
+      console.error(`restore-notice: ${paneId}: launch flags ignored; the pane holds no conversation`);
+      continue;
+    }
+    const path = launchPath(launchDir, session);
+    const temp = `${path}.${process.pid}.tmp`;
+    await Bun.write(temp, `${JSON.stringify({ argv })}\n`, { mode: 0o600 });
+    await rename(temp, path);
+  }
 }
 
 async function loadSeen(statePath: string): Promise<Set<string>> {
@@ -246,10 +303,17 @@ export async function resume(): Promise<void> {
   const token = shellIdentity({ ...shell, tty }, started, JSON.stringify(session));
   const ticketsDir = join(stateDir, hash(socket));
   const ticketPath = join(ticketsDir, `${token}.json`);
+  let flags: string[];
   switch (request.kind) {
     case "link": {
       if (request.token !== token) throw new Error("resume link expired after the shell changed");
-      const original = parsePane(record(await Bun.file(ticketPath).json()).pane);
+      const ticket = record(await Bun.file(ticketPath).json());
+      const original = parsePane(ticket.pane);
+      const shown = ticket.flags ?? [];
+      if (!Array.isArray(shown) || !shown.every((word) => typeof word === "string")) {
+        throw new Error("invalid resume ticket");
+      }
+      flags = shown;
       if (original.id !== paneId) throw new Error("link belongs to another pane");
       if (original.cwd !== current.cwd || JSON.stringify(original.session) !== JSON.stringify(session)) {
         throw new Error("retained session or directory changed");
@@ -261,6 +325,7 @@ export async function resume(): Promise<void> {
         throw new Error("retained session or directory changed");
       }
       await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
+      flags = (await flagsFor(session, join(stateDir, `${hash(socket)}.launch`), new Map()))?.applied ?? [];
       break;
     }
   }
@@ -280,6 +345,7 @@ export async function resume(): Promise<void> {
       current.id,
       "--",
       ...argv.slice(1),
+      ...flags,
     ],
     35000,
   );
@@ -337,10 +403,12 @@ async function waitForForegroundShell(paneId: string, deadline: number): Promise
 async function deliverNotice(
   raw: Record<string, unknown>,
   links: boolean,
-  ticketsDir: string,
+  dirs: { ticketsDir: string; launchDir: string },
+  helps: Helps,
   deadline: number,
   skip?: Set<string>,
 ): Promise<{ identity: string; written: boolean } | undefined> {
+  const { ticketsDir, launchDir } = dirs;
   const pane = parsePane(raw);
   const session = pane.session;
   if (!session) return;
@@ -360,6 +428,7 @@ async function deliverNotice(
   const identity = shellIdentity(target, started, sessionKey);
   if (skip?.has(identity)) return { identity, written: false };
   const missingPath = session.kind === "path" && !(await Bun.file(session.value).exists());
+  const flags = await flagsFor(session, launchDir, helps);
   const notice = formatNotice(
     pane,
     session,
@@ -367,12 +436,15 @@ async function deliverNotice(
     missingPath,
     links ? `herdr-resume://${identity}` : undefined,
     await sessionName(session),
+    flags,
   );
   if (links) {
     await Bun.write(
       join(ticketsDir, `${identity}.json`),
       JSON.stringify({
         pane: { pane_id: pane.id, cwd: pane.cwd, agent_session: session },
+        // A click applies exactly the flags this notice shows.
+        flags: flags?.applied ?? [],
       }),
       { mode: 0o600 },
     );
@@ -421,7 +493,7 @@ export async function released(): Promise<void> {
   }
   const paneId = releasedPaneId(JSON.parse(process.env.HERDR_PLUGIN_EVENT_JSON ?? "null"));
   if (!paneId) return;
-  const { ticketsDir, statePath, stateDir } = pluginDirs();
+  const { ticketsDir, statePath, stateDir, launchDir } = pluginDirs();
   const links = await linksEnabled();
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
@@ -435,7 +507,7 @@ export async function released(): Promise<void> {
     await Bun.sleep(150);
   } while (Date.now() < deadline);
   if (!raw) return;
-  const result = await deliverNotice(raw, links, ticketsDir, deadline);
+  const result = await deliverNotice(raw, links, { ticketsDir, launchDir }, new Map(), deadline);
   if (!result?.written) return;
   const seen = await loadSeen(statePath);
   seen.add(result.identity);
@@ -446,27 +518,32 @@ export async function startup(): Promise<void> {
   if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_EVENT !== "startup") {
     throw new Error("run through Herdr's plugin startup hook");
   }
-  await noticeRestoredPanes();
+  await noticeRestoredPanes(false);
 }
 
 // The startup scan on request, for panes paused after startup, such as the panes
 // a Stash restore leaves with their conversations. Panes already noticed keep
-// their ticket and get no second notice.
+// their ticket and get no second notice. The caller may hand over each pane's
+// launch line in `selected_text` (see `launchInput`), which is kept for Resume.
 export async function notice(): Promise<void> {
   if (process.env.HERDR_ENV !== "1" || process.env.HERDR_PLUGIN_ACTION_ID !== "notice") {
     throw new Error("run through Herdr's notice plugin action");
   }
-  await noticeRestoredPanes();
+  await noticeRestoredPanes(true);
 }
 
-async function noticeRestoredPanes(): Promise<void> {
-  const { ticketsDir, statePath, stateDir } = pluginDirs();
+async function noticeRestoredPanes(acceptLaunches: boolean): Promise<void> {
+  const { ticketsDir, statePath, stateDir, launchDir } = pluginDirs();
   const links = await linksEnabled();
   await mkdir(ticketsDir, { recursive: true, mode: 0o700 });
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   const seen = await loadSeen(statePath);
   const retained = new Set<string>();
-  const panes = restoredShellPanes((await herdr("api", "snapshot")).snapshot);
+  const snapshot = (await herdr("api", "snapshot")).snapshot;
+  const allPanes = Array.isArray(record(snapshot).panes) ? (record(snapshot).panes as unknown[]).map(record) : [];
+  if (acceptLaunches) await saveLaunches(launchDir, allPanes);
+  const panes = restoredShellPanes(snapshot);
+  const helps: Helps = new Map();
   const deadline = Date.now() + 15000;
   let failures = 0;
 
@@ -476,7 +553,7 @@ async function noticeRestoredPanes(): Promise<void> {
   await Promise.all(
     panes.map(async (raw) => {
       try {
-        const result = await deliverNotice(raw, links, ticketsDir, deadline, seen);
+        const result = await deliverNotice(raw, links, { ticketsDir, launchDir }, helps, deadline, seen);
         if (!result) return;
         retained.add(result.identity);
         if (result.written) seen.add(result.identity);
@@ -496,6 +573,16 @@ async function noticeRestoredPanes(): Promise<void> {
   for (const file of await readdir(ticketsDir)) {
     const token = /^([a-f0-9]{64})\.json(?:\.used)?$/.exec(file)?.[1];
     if (token && !retained.has(token)) await rm(join(ticketsDir, file));
+  }
+  // A launch line lives while some pane, paused or running, holds its conversation.
+  const held = new Set(
+    allPanes.flatMap((raw) => {
+      const session = parsePane(raw).session;
+      return session ? [`${hash(JSON.stringify(session))}.json`] : [];
+    }),
+  );
+  for (const file of await readdir(launchDir).catch(() => [])) {
+    if (/^[a-f0-9]{64}\.json$/.test(file) && !held.has(file)) await rm(join(launchDir, file));
   }
   if (failures) throw new Error(`${failures} pane notice(s) failed; see preceding diagnostics`);
 }
