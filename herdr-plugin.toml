@@ -22,6 +22,13 @@ contexts = ["pane"]
 command = ["./bin/restore-notice", "resume"]
 
 [[actions]]
+id = "notice"
+title = "Show Resume notices"
+description = "Print the restore notice in every paused pane that has none yet, such as panes a Stash restore left paused."
+contexts = ["workspace"]
+command = ["./bin/restore-notice", "notice"]
+
+[[actions]]
 id = "list"
 title = "List retained sessions"
 contexts = ["workspace"]

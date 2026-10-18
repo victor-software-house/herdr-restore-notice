@@ -99,6 +99,16 @@ an already running server, linking/enabling the plugin, or reloading
 configuration does **not** rerun startup. Do not restart a busy server to preview
 it; the next normal restore will use the installed plugin.
 
+A pane can also become paused while the server runs, for example when
+[Stash](https://github.com/victor-software-house/herdr-plugins/tree/main/packages/stash)
+restores a workspace and reports each agent's conversation without starting it.
+The `notice` action runs the startup scan on request, and Stash invokes it after
+a restore. Panes that already carry a notice get no second one:
+
+```sh
+herdr plugin action invoke vsh.restore-notice.notice
+```
+
 Active agents and native deferred launches are excluded using Herdr's live
 snapshot. A foreground startup job gets up to 15 seconds to finish. Unsupported
 shells or native session sources are skipped. Live handoff deduplicates notices
