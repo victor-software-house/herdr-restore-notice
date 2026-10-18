@@ -1,4 +1,4 @@
-import { listRetained, notice, released, resume, startup } from "./runtime.ts";
+import { agentDetected, listRetained, notice, resume, startup } from "./runtime.ts";
 
 try {
   const command = process.argv[2];
@@ -6,7 +6,7 @@ try {
   if (command === "resume") await resume();
   else if (command === "list") await listRetained();
   else if (command === "notice") await notice();
-  else if (event === "pane.agent_detected") await released();
+  else if (event === "pane.agent_detected") await agentDetected();
   else await startup();
 } catch (error) {
   console.error(`restore-notice: ${error instanceof Error ? error.message : String(error)}`);

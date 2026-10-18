@@ -188,6 +188,27 @@ export function launchInput(value: unknown): Map<string, string[]> {
   return launches;
 }
 
+// The launch line of the foreground process running `executable`, without its
+// program name. A wrapper (`fnox exec … -- claude`) may lead the process group,
+// so the agent's own process is searched for. Only a real argv is read: a
+// flattened cmdline cannot keep an argument that held a space.
+export function agentLaunch(value: unknown, executable: string): string[] | undefined {
+  const info = record(value);
+  if (!Array.isArray(info.foreground_processes)) return;
+  for (const raw of info.foreground_processes) {
+    const argv = record(raw).argv;
+    if (!Array.isArray(argv) || !argv.every((word) => typeof word === "string")) continue;
+    if (argv.length === 0 || basename(argv[0] as string) !== executable) continue;
+    if (argv.length > 65 || Buffer.byteLength(argv.join("")) > 8192) return;
+    try {
+      return argv.slice(1).map(text);
+    } catch {
+      return;
+    }
+  }
+  return;
+}
+
 // Matches Herdr's POSIX quoting, including single quotes, $, ; and whitespace.
 export function quote(value: string): string {
   return /^[a-zA-Z0-9_./:@%+=-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  agentLaunch,
   formatNotice,
   helpArgv,
   helpOptions,
@@ -8,6 +9,7 @@ import {
   parsePane,
   type Session,
 } from "../src/notice.ts";
+import { startedPaneId } from "../src/runtime.ts";
 
 // Excerpts of the real help output: claude 2.1 (commander) and omp 18.6 (oclif).
 const claudeHelp = `Usage: claude [options] [command] [prompt]
@@ -179,4 +181,36 @@ test("the notice shows what Resume applies and what it leaves out", () => {
     },
   );
   expect(unchecked).toContain("Launch flags not reapplied: claude --help could not be read.");
+});
+
+describe("capture on agent start", () => {
+  // Observed on herdr 0.9.5: the wrapper leads the group; the agent and its helpers follow.
+  const info = {
+    foreground_process_group_id: 48462,
+    foreground_processes: [
+      { pid: 48500, argv0: "bun", argv: ["bun", "/tmp/research-mcp"] },
+      { pid: 48494, argv0: "claude", argv: ["claude", "--model", "opus", "--resume", "abc"] },
+      { pid: 48462, argv0: "fnox", argv: ["fnox", "exec", "--", "claude", "--model", "opus"] },
+    ],
+  };
+  test("the agent's own process, not the wrapper", () => {
+    expect(agentLaunch(info, "claude")).toEqual(["--model", "opus", "--resume", "abc"]);
+    expect(agentLaunch(info, "pi")).toBeUndefined();
+  });
+  test("a rewritten title gives no line, and unsafe words give none", () => {
+    expect(
+      agentLaunch({ foreground_processes: [{ pid: 1, argv0: "pi", argv: null }] }, "pi"),
+    ).toBeUndefined();
+    expect(
+      agentLaunch({ foreground_processes: [{ pid: 1, argv: ["claude", "\x1b[2J"] }] }, "claude"),
+    ).toBeUndefined();
+  });
+  test("only a detection, not a release, starts a capture", () => {
+    const event = (released: boolean) => ({
+      event: "pane.agent_detected",
+      data: { type: "pane_agent_detected", pane_id: "w1:p2", workspace_id: "w1", released },
+    });
+    expect(startedPaneId(event(false))).toBe("w1:p2");
+    expect(startedPaneId(event(true))).toBeUndefined();
+  });
 });

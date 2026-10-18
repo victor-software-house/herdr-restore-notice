@@ -127,7 +127,12 @@ herdr plugin action invoke vsh.restore-notice.list
 ## Launch flags
 
 Herdr keeps a paused pane's conversation, not the flags its agent was started
-with. A caller that recorded them, such as Stash, hands them to the `notice`
+with. The plugin records them itself when an agent starts in a pane
+(`pane.agent_detected`): it waits for the pane's conversation, then reads the
+agent's own process, not a wrapper that launched it, so Herdr's own restart
+resumes the agent with them. pi rewrites its process title and gives none.
+
+A caller that recorded them elsewhere, such as Stash, hands them to the `notice`
 action, one launch line per pane without the program name, as JSON in the
 context's `selected_text`, the only free-text field an invocation carries:
 
