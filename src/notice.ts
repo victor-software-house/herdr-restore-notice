@@ -256,7 +256,7 @@ export function formatNotice(
     `${cyan}${session.agent}${reset}${separator}${dim}paused${reset}${name ? `${separator}\x1b[1m${name}${reset}` : ""}`,
     actions,
     ...flagLines,
-    ...(missingPath ?["\x1b[33mTranscript missing; restore it before resuming.\x1b[0m"] : []),
+    ...(missingPath ? ["\x1b[33mTranscript missing; restore it before resuming.\x1b[0m"] : []),
     "",
   ].join("\r\n");
 }
