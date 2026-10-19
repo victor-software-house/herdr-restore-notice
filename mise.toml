@@ -4,6 +4,8 @@ lockfile = true
 [tools]
 bun = "1.3.14"
 node = "26.7.0"
+# lint:workflows checks .github/workflows.
+actionlint = "1.7.12"
 
 [env]
 _.path = ["{{config_root}}/node_modules/.bin"]
@@ -14,6 +16,9 @@ run = "bun build src/main.ts --compile --outfile bin/restore-notice"
 [tasks.lint]
 run = ["biome check .", "oxlint src test scripts"]
 
+[tasks."lint:workflows"]
+run = "actionlint"
+
 [tasks.typecheck]
 run = "tsc --noEmit"
 
@@ -21,7 +26,7 @@ run = "tsc --noEmit"
 run = "bun test"
 
 [tasks.verify]
-depends = ["lint", "typecheck", "test", "manifest-check"]
+depends = ["lint", "lint:workflows", "typecheck", "test", "manifest-check"]
 
 [tasks."manifest-check"]
 run = "bun scripts/version.ts --check"
