@@ -42,7 +42,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app.outputs.token }}
       - if: steps.changesets.outputs.pullRequestNumber
-        run: gh pr merge "$PR" --auto --squash --subject "chore(release): version packages (#$PR)"
+        run: >-
+          gh pr merge "$PR" --auto --squash
+          --subject "chore(release): version packages (#$PR)"
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           PR: ${{ steps.changesets.outputs.pullRequestNumber }}
